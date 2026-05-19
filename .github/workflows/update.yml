@@ -1,0 +1,65 @@
+name: Update Subscription
+
+on:
+ schedule:
+   - cron: "0 */2 * * *"
+
+ workflow_dispatch:
+   inputs:
+     force:
+       description: "Принудительное обновление (игнорировать кэш)"
+       required: false
+       default: "false"
+       type: boolean
+
+jobs:
+ collect:
+   name: Collect & Check Servers
+   runs-on: ubuntu-latest
+   timeout-minutes: 30
+
+   permissions:
+     contents: write
+
+   steps:
+     - name: Checkout
+       uses: actions/checkout@v4
+       with:
+         fetch-depth: 1
+
+     - name: Set up Python
+       uses: actions/setup-python@v5
+       with:
+         python-version: "3.11"
+         cache: pip
+
+     - name: Prepare output dir
+       run: mkdir -p output
+
+     - name: Run collector
+       run: python src/collector.py
+       env:
+         PYTHONUNBUFFERED: "1"
+
+     - name: Show stats
+       run: |
+         echo "=== stats.json ==="
+         cat output/stats.json
+         echo ""
+         echo "=== Количество серверов ==="
+         wc -l output/subscription.txt
+
+     - name: Commit & Push
+       run: |
+         git config user.name  "github-actions[bot]"
+         git config user.email "github-actions[bot]@users.noreply.github.com"
+
+         git add output/subscription.txt output/subscription_b64.txt output/stats.json
+
+         if git diff --cached --quiet; then
+           echo "Изменений нет, пропускаем коммит."
+         else
+           ALIVE=$(python -c "import json; d=json.load(open('output/stats.json')); print(d['alive'])")
+           git commit -m "chore: update subscription [${ALIVE} servers] $(date -u +'%Y-%m-%d %H:%M UTC')"
+           git push
+         fi
